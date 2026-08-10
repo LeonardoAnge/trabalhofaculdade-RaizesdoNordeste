@@ -28,7 +28,7 @@ Tela para a cozinha poder atualizar pedidos prontos, deixando o status 'Finaliza
 pip install fastapi uvicorn
 
 # Comando para ligar o servidor web
-uvicorn main:app --reloadSistema Back-End - Lanchonete Raízes do Nordeste
+uvicorn main:app --reload
 
 #A documentação interativa da API pode ser acessada pelo Swagger:
 http://127.0.0.1:8000/docs
