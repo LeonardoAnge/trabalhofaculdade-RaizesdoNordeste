@@ -1,6 +1,6 @@
 from database import BackEnd #importação do backend no arquivo database
 #importação das classes no aquivo schemas
-from schemas import UsuarioCreate, UsuarioLogin, UsuarioOut, LoginOut, EstoqueBase, EstoqueOut, EstoqueCreate, CardapioCreate, CardapioOut, UnidadeOut, UnidadeCreate, PedidoCreate, PedidoUpdate, PedidoOut 
+from schemas import UsuarioCreate, UsuarioLogin, UsuarioOut, LoginOut, EstoqueBase, EstoqueOut, EstoqueCreate, CardapioCreate, CardapioOut, UnidadeOut, UnidadeCreate, PedidoCreate, PedidoOut, CanaisAtendimento, StatusPagamento, Cargos
 from fastapi import HTTPException #extensão do fastapi, para descrever erros.
 import hashlib #Biblioteca para a criação de senhas HASH
 import re #Biblioteca para remodelar os caracteres digitados.
@@ -10,6 +10,11 @@ def salvar_cadastro(db: BackEnd, usuario: UsuarioCreate): # função salvar cada
         if usuario.senha != usuario.confirma_senha:# caso senha for diferente do confirmar senha, vai dar um erro.
             raise HTTPException(status_code= 400, detail= "As senha não coincidem. Digite novamente!")
 
+        telefone_limpo = re.sub(r"\D","", usuario.telefone) #re.sub para retirar qlqer carectere digitado q nao seja numeros.
+
+        if len (telefone_limpo) != 11:# caso telefone digitado for diferente de 11 (2 numeros do ddd e 9 do numero)
+            raise HTTPException(status_code= 400, detail= "Numero de telefone inválido")
+        
         cpf_limpo = re.sub(r"\D","", usuario.cpf)#re para tirar qlqer carectere digitado que não seja numeros
         if len(cpf_limpo) != 11: #len para contabilizar os carecteres digitandos e caso for diferente de 11, returna o Raise
             raise HTTPException(status_code= 400, detail= "CPF inválido")
@@ -22,11 +27,11 @@ def salvar_cadastro(db: BackEnd, usuario: UsuarioCreate): # função salvar cada
             INSERT INTO Usuarios (Telefone, Nome, Email, CPF, Data_de_Nascimento, Senha_hash, Cargo)
             VALUES (?, ?, ?, ?, ?, ?, ?)
 
-        """, (usuario.telefone, usuario.nome, usuario.email, cpf_limpo, usuario.data_nascimento , senha_hash, usuario.cargo)) #inserção de dados no banco usuarios
+        """, (usuario.telefone, usuario.nome, usuario.email, cpf_limpo, usuario.data_nascimento , senha_hash, "Cliente")) #inserção de dados no banco usuarios
             
             db.conn.commit()
 
-            return UsuarioOut(telefone = usuario.telefone, nome = usuario.nome, email = usuario.email, cpf = cpf_limpo, data_nascimento= usuario.data_nascimento, cargo = usuario.cargo) # return das informações q acabou de serem salvas, onde a senha não sera salva, apenas senha_hash
+            return UsuarioOut(telefone = usuario.telefone, nome = usuario.nome, email = usuario.email, cpf = cpf_limpo, data_nascimento= usuario.data_nascimento, função = "Cliente") # return das informações q acabou de serem salvas, onde a senha não sera salva, apenas senha_hash
         
         except sqlite3.IntegrityError: #Caso nao consiga inserir os dados por ja ter cadastrado cpf ou senha, vai dar erro
             raise HTTPException(status_code= 409, detail= "Este CPF ou Email ja está cadastrado.")
@@ -78,20 +83,42 @@ def cadastrar_produto (db: BackEnd, estoque: EstoqueCreate):
     db.conecta_db()
     try:
         db.cursor.execute("""
+        SELECT id
+        FROM Cardapio
+        WHERE id = ?""", (estoque.cardapio_id,))
+
+        prato = db.cursor.fetchone()
+
+        if not prato:
+            raise HTTPException(
+                status_code=404,
+                detail="Prato não consta mais em nosso cardápio!"
+            )
+        db.cursor.execute("""
+        SELECT id
+        FROM Unidade
+        WHERE id = ? """, (estoque.unidade_id,))
+        
+        unidade = db.cursor.fetchone()
+        
+        if not unidade:
+            raise HTTPException(status_code=404, detail="Unidade não registrada ainda!")
+        
+        db.cursor.execute("""
         INSERT INTO Estoque (Unidade_id, Cardapio_id, Quantidade)
         VALUES (?, ?, ?)
         """, (estoque.unidade_id, estoque.cardapio_id, estoque.quantidade))
         db.conn.commit()
         
         db.cursor.execute("""
-            SELECT Cardapio.id, Cardapio.Prato, Cardapio.Preco, Estoque.Quantidade
+            SELECT Estoque.Unidade_id, Cardapio.id, Cardapio.Prato, Cardapio.Preco, Estoque.Quantidade
             FROM Estoque
             INNER JOIN Cardapio ON Estoque.Cardapio_id = Cardapio.id
             WHERE Estoque.Unidade_id = ? AND Estoque.Cardapio_id = ?
             """, (estoque.unidade_id, estoque.cardapio_id))
             
         estoque_atualizado = db.cursor.fetchone()
-        return EstoqueOut (id = estoque_atualizado [0], prato = estoque_atualizado [1], preco = estoque_atualizado[2], quantidade= estoque_atualizado [3])
+        return EstoqueOut (unidade_id = estoque_atualizado[0],id = estoque_atualizado [1], prato = estoque_atualizado [2], preco = estoque_atualizado[3], quantidade= estoque_atualizado [4])
                         
     except sqlite3.IntegrityError:
         raise HTTPException(status_code= 409, detail="Prato ja cadastrado!")
@@ -104,19 +131,23 @@ def criar_unidade(db: BackEnd, unidade: UnidadeCreate):
         db.cursor.execute("""
         SELECT Cargo FROM Usuarios
         WHERE Telefone = ?
-    """, (unidade.gerente,))
+    """, (unidade.gerente_telefone,))
         gerente = db.cursor.fetchone() #fetchone para salvar os dados
+        if not gerente:
+            raise HTTPException(status_code= 404, detail= "Telefone não encontrado em nosso banco!")
+        
         cargo = gerente[0] #pego a variavel cargo e deu o valor gerente [0]
+
         if cargo != "Gerente":#apenas usuarios com cargo gerente podem ser registrados como responsavel por unidade.
-            raise HTTPException(status_code= 404, detail= "Usuario selecionado nao possui o cargo 'Gerente'!")
+            raise HTTPException(status_code= 403, detail= "Usuario selecionado nao possui o cargo 'Gerente'!")
 
         db.cursor.execute("""
         INSERT INTO Unidade (Nome, Gerente)
         VALUES (?, ?)
-        """, (unidade.nome, unidade.gerente))
+        """, (unidade.nome, unidade.gerente_telefone))
         id_unidade = db.cursor.lastrowid
         db.conn.commit()
-        return UnidadeOut (id = id_unidade, nome = unidade.nome, gerente = unidade.gerente)
+        return UnidadeOut (id = id_unidade, nome = unidade.nome, gerente = unidade.gerente_telefone)
                     
     except sqlite3.IntegrityError:
         raise HTTPException(status_code= 409, detail="Gerente selecionado ja registrado!")
@@ -144,21 +175,25 @@ def listar_unidade(db:BackEnd):
     finally:
         db.desconecta_db()
 
-def listar_pratos(db: BackEnd, limit : int = 50, offset: int = 0): #limit para o maximo de pratos a returna e offset para pular os id.
+def listar_pratos(db: BackEnd, unidade_id, limit : int = 50, offset: int = 0): #limit para o maximo de pratos a returna e offset para pular os id.
     db.conecta_db()
     try:
         db.cursor.execute("""
-        SELECT id, Prato, Preco FROM Cardapio
+        SELECT id, Prato, Preco, Estoque.Quantidade FROM Cardapio
+        INNER JOIN Estoque ON Cardapio.id = Cardapio_id
+        WHERE Estoque.Unidade_id = ? AND Estoque.Quantidade > 0
         LIMIT  ? 
         OFFSET  ? 
-""",(limit, offset))
+""",(unidade_id, limit, offset))
+        
         pratos = db.cursor.fetchall()
         if not pratos:
             raise HTTPException(status_code= 404, detail= "Nenhum prato encontrado em nosso sistema")
 
         return [{"id": prato [0],
                 "prato" : prato [1],
-                "preco" : prato [2]}
+                "preco" : prato [2],
+                "quantidade": prato [3]}
                 for prato in pratos]
     
     except sqlite3.IntegrityError as erro:
@@ -191,16 +226,16 @@ def listar_estoque(db: BackEnd, unidade_id):
         finally:
             db.desconecta_db()
 
-def listar_pedidos(db: BackEnd):
+def listar_pedidos(db: BackEnd, unidade_id):
     db.conecta_db()
     try:
         db.cursor.execute("""
-        SELECT Pedidos.id, Cardapio.Prato, Cardapio.Preco, ItensPedido.Quantidade 
+        SELECT Pedidos.id, Cardapio.Prato, ItensPedido.Quantidade 
         FROM Pedidos
         INNER JOIN ItensPedido ON Pedidos.id = ItensPedido.Pedido_id
         INNER JOIN Cardapio ON ItensPedido.Cardapio_id = Cardapio.id
-        WHERE Pedidos.Status_pagamento = 'PAGAMENTO_APROVADO' AND Pedidos.Status_pedido = 'Em preparação...'
-           """)
+        WHERE Pedidos.Status_pagamento = 'PAGAMENTO_APROVADO' AND Pedidos.Status_pedido = 'Em preparação...' AND Pedidos.Unidade_id = ?
+           """, (unidade_id,))
         pedidos = db.cursor.fetchall()
 
         if not pedidos:
@@ -208,9 +243,34 @@ def listar_pedidos(db: BackEnd):
 
         return [{"id": pedido [0],
                 "prato": pedido [1],
-                "preco": pedido [2],
-                "quantidade": pedido[3]}
+                "quantidade": pedido[2]}
                 for pedido in pedidos]
+    
+    except sqlite3.IntegrityError as erro:
+        raise HTTPException(status_code= 500, detail= f"Erro no banco de dados: {erro}")
+    finally:
+        db.desconecta_db()
+
+def listar_pedidos_canal(db:BackEnd, canal_pedido: CanaisAtendimento):
+    db.conecta_db()
+    try:
+        db.cursor.execute("""
+        SELECT id, Unidade_id, Cliente_telefone, Forma_pagamento, Total, Status_pagamento, Status_pedido FROM Pedidos
+        WHERE Status_pagamento = 'PAGAMENTO_APROVADO' AND Canal = ?
+""", (canal_pedido.value,))
+        pedido_canal = db.cursor.fetchall()
+
+        if not pedido_canal:
+            raise HTTPException(status_code= 404, detail= "Nenhum pedido encontrado!")
+        
+        return [{"id" : canal [0],
+                "unidade_id" : canal [1],
+                "cliente_telefone" : canal [2],
+                "forma_pagamento" : canal [3],
+                "total" : canal [4],
+                "status_pagamento" : canal [5],
+                "status_pedido" : canal [6]}
+                for canal in pedido_canal]
     
     except sqlite3.IntegrityError as erro:
         raise HTTPException(status_code= 500, detail= f"Erro no banco de dados: {erro}")
@@ -248,27 +308,43 @@ def atualizar_quantidade (db:BackEnd, estoque:EstoqueBase):#função para adicio
          
         db.conn.commit()
         db.cursor.execute("""
-            SELECT Cardapio.id, Cardapio.Prato, Cardapio.Preco, Estoque.Quantidade
+            SELECT Cardapio.id, Cardapio.Prato, Estoque.Quantidade
             FROM Estoque
             INNER JOIN Cardapio ON Estoque.Cardapio_id = Cardapio.id
             WHERE Estoque.Unidade_id = ? AND Estoque.Cardapio_id = ?
             """, (estoque.unidade_id, estoque.cardapio_id)) #pega os valores das tabelas Cardapio e Estoque, para salva no fetchone.
     
         estoque_atualizado = db.cursor.fetchone()
-        return EstoqueOut (id = estoque_atualizado [0], prato = estoque_atualizado [1], preco = estoque_atualizado[2], quantidade= estoque_atualizado [3])
+
+        return {"id": estoque_atualizado[0],
+                "prato": estoque_atualizado[1],
+                "quantidade": estoque_atualizado[2]}
                 
     finally:
         db.desconecta_db()
 
-def criar_pedido (db: BackEnd, pedido: PedidoCreate):
+def criar_pedido (db: BackEnd, pedido: PedidoCreate, canal: CanaisAtendimento):
         db.conecta_db()
         valor_total_pedido = 0.0 #valor inicial do pedido
         try:
+            db.cursor.execute("""
+            SELECT Telefone FROM Usuarios
+            WHERE Telefone = ? 
+            """, (pedido.cliente_telefone,))
+
+            telefone = db.cursor.fetchone()
+
+            if not telefone:
+                raise HTTPException(status_code=404, detail="Usuario não encontrado em nosso sistema")
+            
             for item in pedido.itens: #um for para passar por todas lista por itens
                 db.cursor.execute(""" 
                 SELECT Quantidade FROM Estoque WHERE Unidade_id = ? AND Cardapio_id = ? 
                 """,(pedido.unidade_id, item.cardapio_id))
                 produto = db.cursor.fetchone()
+                if not produto:
+                    raise HTTPException(status_code=404,detail="Prato não possui estoque disponível nesta unidade.")
+                
                 quantidade = produto [0] #pega a quantidade de produtos no Estoque
 
                 if quantidade < item.quantidade: #caso a quantidade do Estoque for menor q a quantidade pedida, vai dar erro raise
@@ -293,7 +369,7 @@ def criar_pedido (db: BackEnd, pedido: PedidoCreate):
             db.cursor.execute("""
             INSERT INTO Pedidos (Canal, Cliente_telefone, Forma_pagamento, Unidade_id, Total, Status_pagamento, Status_pedido)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,(pedido.canalPedido, pedido.cliente_telefone, "MOCK", pedido.unidade_id, valor_total_pedido, "AGUARDANDO_PAGAMENTO", "AGUARDANDO_PAGAMENTO")) #Inserir valores na tabela pedido
+            """,(canal.value, pedido.cliente_telefone, "MOCK", pedido.unidade_id, valor_total_pedido, "AGUARDANDO_PAGAMENTO", "AGUARDANDO_PAGAMENTO")) #Inserir valores na tabela pedido
 
             pedido_id = db.cursor.lastrowid #pega o ultimo id registrado.
 
@@ -314,39 +390,61 @@ def criar_pedido (db: BackEnd, pedido: PedidoCreate):
         finally:
              db.desconecta_db()
 
-def status_pedido(db: BackEnd, pedido: PedidoUpdate, id_pedido):# função para alterar o status_pagamento
+def status_pedido(db: BackEnd, status: StatusPagamento , id_pedido):# função para alterar o status_pagamento
     db.conecta_db()
     try:
         db.cursor.execute("""
         UPDATE Pedidos
         SET Status_pagamento = ?
         WHERE id = ?
-        """, (pedido.status_pagamento, id_pedido)) 
-        db.conn.commit()
+        """, (status.value, id_pedido))
 
-        if pedido.status_pagamento == "PAGAMENTO_APROVADO":
+        if status.value == "PAGAMENTO_APROVADO": #Caso o pagamento seja aprovado, o pedido vai para preparação
             db.cursor.execute("""
             UPDATE Pedidos
             SET Status_pedido = 'Em preparação...'
             WHERE id = ?
             """, (id_pedido,)) 
 
-        if pedido.status_pagamento == "PAGAMENTO_RECUSADO":
+        if status.value == "PAGAMENTO_RECUSADO":
             db.cursor.execute("""
-            SELECT Cardapio_id, Quantidade FROM ItensPedido
+            SELECT Status_pedido 
+            FROM Pedidos
+            WHERE id = ?
+            """,(id_pedido,))
+
+            confirma = db.cursor.fetchone()
+            if not confirma:
+                raise HTTPException(status_code=404, detail="Pedido não encontrado!")
+            
+            pedido = confirma [0]
+
+            if pedido == "Recusado":
+                raise HTTPException(status_code=400, detail="O pedido selecionado já foi recusado!")
+            
+            db.cursor.execute("""
+            SELECT Cardapio_id, Pedidos.Unidade_id, Quantidade FROM ItensPedido
+            INNER JOIN Pedidos ON ItensPedido.Pedido_id = Pedidos.id 
             WHERE Pedido_id = ?     
 """,(id_pedido,)) # caso o pagamento for recusado, vai returna a quantidade de produtos para o estoque
-            
+
             retornar_quantidade = db.cursor.fetchall()
             for itens in retornar_quantidade:
                 cardapio_id = itens[0]
-                quantidade = itens [1]
+                id_unidade = itens [1]
+                quantidade = itens [2]
 
                 db.cursor.execute("""
                 UPDATE Estoque
                 SET Quantidade = Quantidade + ?
-                WHERE Cardapio_id = ?
-    """,(quantidade, cardapio_id))
+                WHERE Unidade_id = ? AND Cardapio_id = ?
+    """,(quantidade, id_unidade, cardapio_id))
+
+                db.cursor.execute("""
+                UPDATE Pedidos
+                SET Status_pedido = 'Recusado'
+                WHERE id = ?
+                """,(id_pedido,))
                 
         db.conn.commit()
 
@@ -357,9 +455,35 @@ def status_pedido(db: BackEnd, pedido: PedidoUpdate, id_pedido):# função para 
 
         carrinho = db.cursor.fetchone()
 
-        return PedidoOut(id=carrinho[0], cliente_telefone=carrinho[1], status_pedido=carrinho[2]
-)
+        return {"id": carrinho[0],
+                "cliente_telefone": carrinho[1],
+                "status_pedido": carrinho[2]}
+
               
+    finally:
+        db.desconecta_db()
+
+def atualizar_cargo (db:BackEnd, cargo: Cargos, telefone: str):
+    db.conecta_db()
+    try:
+        db.cursor.execute("""
+        SELECT Telefone, Nome, Cargo FROM Usuarios
+        WHERE Telefone = ?
+        """, (telefone,))
+
+        usuario = db.cursor.fetchone()
+
+        if not usuario:
+            raise HTTPException(status_code= 404, detail="Usuario não encontrado em nosso sistema!")
+        
+        db.cursor.execute("""
+        UPDATE Usuarios
+        SET Cargo = ?
+        WHERE Telefone = ?""", (cargo.value, telefone))
+        db.conn.commit()
+
+        return {f"O Usuario com telefone: {telefone} foi mudado para o cargo: {cargo.value} com sucesso."}
+
     finally:
         db.desconecta_db()
 
@@ -437,13 +561,41 @@ def excluir_prato(db: BackEnd, prato_id: int):
     db.conecta_db()
     try:
         db.cursor.execute("""
-        DELETE FROM Cardapio WHERE id = ?
-    """, (prato_id,)) #deleta os pratos com o id enviado
+        SELECT id
+        FROM Cardapio
+        WHERE id = ?""", (prato_id,))
 
-        if db.cursor.rowcount == 0:
+        prato = db.cursor.fetchone()
+        if not prato:
             raise HTTPException(status_code= 404, detail="Prato não encontrado em nosso sistema!")
 
+        db.cursor.execute("""
+        UPDATE Cardapio
+        SET Ativo = 0
+        WHERE id = ?
+    """, (prato_id,)) #deleta os produtos do estoque, para depois deletar os pratos do cardapio
+
         db.conn.commit()
+        return {"mensagem": "Prato desativado com sucesso!"}
                      
+    finally:
+        db.desconecta_db()
+
+def reativar_prato(db:BackEnd, prato_id):
+    db.conecta_db()
+    try:
+        db.cursor.execute("""
+        UPDATE Cardapio
+        SET Ativo = 1
+        WHERE id = ?
+        """, (prato_id,))
+
+        if db.cursor.rowcount == 0:
+            raise HTTPException(status_code=404,detail="Prato não encontrado em nosso sistema!")
+
+        db.conn.commit()
+
+        return {"mensagem": "Prato reativado com sucesso!"}
+                             
     finally:
         db.desconecta_db()

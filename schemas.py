@@ -1,7 +1,13 @@
 from pydantic import BaseModel, EmailStr #Classe mãe das validações e EmailStr para conferir se é um email valido.
-from typing import Optional, List # para campos nao obrigatorios de preencher
+from typing import List # para campos nao obrigatorios de preencher
 from enum import Enum
 from datetime import date
+
+class Cargos (str, Enum):
+    Cliente = "Cliente"
+    Caixa = "Caixa"
+    Cozinha = "Cozinha"
+    Gerente = "Gerente"
 
 class UsuariosBase(BaseModel):
     telefone : str
@@ -9,7 +15,6 @@ class UsuariosBase(BaseModel):
     email: EmailStr #Usa o EmailStr para validação de email.
     cpf : str
     data_nascimento: date
-    cargo: Optional[str] = "Cliente" #Caso não enviem nada o padrão é cliente
 
 class UsuarioCreate(UsuariosBase):
     senha: str
@@ -44,7 +49,6 @@ class ItemPedido(BaseModel):
     quantidade: int
 
 class PedidoCreate(BaseModel):
-    canalPedido: CanaisAtendimento
     unidade_id : int
     cliente_telefone: str
     itens: List[ItemPedido]
@@ -82,6 +86,7 @@ class EstoqueCreate(EstoqueBase):
     pass
 
 class EstoqueOut(BaseModel):
+    unidade_id: int
     id: int
     prato: str
     preco: float
@@ -97,7 +102,7 @@ class UnidadeBase(BaseModel):
 
 class UnidadeCreate(BaseModel):
     nome: str
-    gerente: str
+    gerente_telefone: str
 
 class UnidadeOut(UnidadeBase):
     pass

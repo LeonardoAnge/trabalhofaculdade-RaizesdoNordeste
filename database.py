@@ -13,7 +13,7 @@ class BackEnd:
         self.conecta_db()
 
         self.cursor.execute("PRAGMA foreign_keys = ON;") # para habilitar o foreign key
-        #criação de tabelas, q foram puxazdas do models
+        #criação de tabelas, q foram puxadas do models
         self.cursor.execute(CRIAR_TABELA_USUARIOS)
         self.cursor.execute(CRIAR_TABELA_UNIDADE)
         self.cursor.execute(CRIAR_TABELA_CARDAPIO)

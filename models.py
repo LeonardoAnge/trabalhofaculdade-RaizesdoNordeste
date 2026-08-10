@@ -19,7 +19,8 @@ CRIAR_TABELA_CARDAPIO ="""
             CREATE TABLE IF NOT EXISTS Cardapio(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             Prato TEXT COLLATE NOCASE UNIQUE NOT NULL,
-            Preco REAL NOT NULL)
+            Preco REAL NOT NULL,
+            Ativo INTEGER NOT NULL DEFAULT 1)
         """
 CRIAR_TABELA_ESTOQUE ="""
             CREATE TABLE IF NOT EXISTS Estoque(

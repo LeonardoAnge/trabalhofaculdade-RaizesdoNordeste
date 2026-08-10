@@ -1,6 +1,5 @@
-from fastapi import FastAPI, Query, HTTPException
-from schemas import CardapioOut, CardapioCreate,CardapioUpdate, UsuarioOut, UsuarioCreate, UsuarioLogin, LoginOut, EstoqueBase, EstoqueOut,EstoqueUpdate, UnidadeBase, UnidadeOut, UnidadeCreate, PedidoCreate, PedidoOut, PedidoUpdate
-from typing import List
+from fastapi import FastAPI, Query
+from schemas import CardapioOut, CardapioCreate, UsuarioOut, UsuarioCreate, UsuarioLogin, LoginOut, EstoqueBase, EstoqueOut,EstoqueUpdate, UnidadeOut, UnidadeCreate, PedidoCreate, PedidoOut, CanaisAtendimento, StatusPagamento, Cargos
 from database import BackEnd
 import crud
 
@@ -24,6 +23,12 @@ def inicio():
 def salvar_cadastro(usuario: UsuarioCreate):
     return crud.salvar_cadastro(db, usuario)
 
+@app.put("/Atualizar/Cargo/Usuario",
+         summary= "Atualizar cargo do usuario.",
+         tags = ["Usuario"])
+def atualizar_cargo(cargo: Cargos, telefone:str):
+    return crud.atualizar_cargo(db, cargo, telefone)
+
 #Verificação de Login
 @app.post("/Auth/Login",
          response_model= LoginOut,
@@ -45,15 +50,11 @@ def criar_prato(prato: CardapioCreate):
 #Listar Cardapio
 @app.get (
     "/List/Cardapio",
-    response_model = List [CardapioOut],
     summary = "Listar Cardapio",
     tags = ["Cardapio"]
     )
-def listar_pratos(
-    offset: int = Query(0, ge=0, description="Número de pratos a pular"),
-    limit: int = Query(50, ge=1, le=200, description="Máximo de pratos a retornar")
-):
-    return crud.listar_pratos(db, limit=limit, offset=offset)
+def listar_pratos(unidade_id:int , offset: int = Query(0, ge=0, description="Número de pratos a pular"), limit: int = Query(50, ge=1, le=200, description="Máximo de pratos a retornar")):
+    return crud.listar_pratos(db, unidade_id, limit=limit, offset=offset)
 
 #Atualizar prato
 @app.put("/Preco/Cardapio/{prato_id}",
@@ -64,12 +65,19 @@ def atualizar_prato(usuario: UsuarioLogin, prato_id: int, preco: float):
     return crud.atualizar_prato(db, usuario, preco, prato_id)
 
 #Deletar prato
-@app.delete("/Delete/Cardapio/{prato_id}",
+@app.delete("/Desativar/Cardapio/{prato_id}",
         status_code= 200,
-        summary= "Deletar um prato do cardapio por ID",
+        summary= "Desativa um prato do cardapio por ID",
         tags = ["Cardapio"])
 def excluir_prato(prato_id: int):
-    crud.excluir_prato(db, prato_id)
+    return crud.excluir_prato(db, prato_id)
+
+@app.put("/Reativar/Cardapio/{prato_id}",
+        status_code= 200,
+        summary= "Reativar um prato do cardapio por ID",
+        tags = ["Cardapio"])
+def reativar_prato(prato_id: int):
+    return crud.reativar_prato(db, prato_id)
 
 @app.post("/Criar/Unidade",
         response_model= UnidadeOut,
@@ -80,7 +88,6 @@ def criar_unidade(unidade: UnidadeCreate):
     return crud.criar_unidade(db, unidade)
 
 @app.get("/List/Unidade",
-        response_model= list [UnidadeOut],
         summary= "Lista de todas unidades",
         tags = ["Unidade"])
 def listar_unidade():
@@ -97,15 +104,12 @@ def criar_prato(produto: EstoqueBase):
 
 #Cadastro de pratos
 @app.post("/Estoque/Abastecimento",
-        response_model= EstoqueOut,
-        status_code= 201,
         summary= "Abastecer estoque",
         tags = ["Estoque"])
 def adicionar_estoque(produto: EstoqueUpdate):
     return crud.adicionar_estoque(db, produto)
 
 @app.get("/List/Estoque/{Unidade_id}",
-        response_model= list [EstoqueOut],
         summary= "Listar produtos estoque",
         tags = ["Estoque"])
 def listar_estoque(unidade_id: int):
@@ -116,27 +120,31 @@ def listar_estoque(unidade_id: int):
          status_code= 201,
          summary= "Criar pedido",
          tags = ["Pedidos"])
-def criar_pedido(pedido: PedidoCreate):
-    return crud.criar_pedido(db, pedido)
+def criar_pedido(pedido: PedidoCreate, canal: CanaisAtendimento):
+    return crud.criar_pedido(db, pedido, canal)
 
-@app.put("/Status/Pedido{id_pedido}",
-        response_model= PedidoOut,
-         status_code= 201,
+@app.put("/Status/Pedido/{id_pedido}",
          summary= "Atualizar Pedido",
          tags = ["Pedidos"])
-def status_pedido(pedido: PedidoUpdate, id_pedido):
-    return crud.status_pedido(db, pedido, id_pedido)
+def status_pedido(status: StatusPagamento , id_pedido: int):
+    return crud.status_pedido(db, status , id_pedido)
 
-@app.get("/List/Pedido/{Unidade_id}",
-        response_model= list [EstoqueOut],
-        summary= "Listar pedidos feitos",
+
+@app.get("/List/Pedido/Canal",
+        summary= "Listar pedidos feitos em cada canal e que ja foram pagos",
         tags = ["Pedidos"])
-def listar_pedidos():
-    return crud.listar_pedidos(db)
+def listar_pedidos_canal(canal_pedido: CanaisAtendimento):
+    return crud.listar_pedidos_canal(db, canal_pedido)
 
-@app.put("/Cozinha/Pedido{id_pedido}",
+@app.get("/Cozinha/List/Pedido/{Unidade_id}",
+        summary= "Listar pedidos feitos para ser preparados",
+        tags = ["Pedidos"])
+def listar_pedidos(unidade_id: int):
+    return crud.listar_pedidos(db, unidade_id)
+
+@app.put("/Cozinha/Pedido/{id_pedido}",
          status_code= 201,
-         summary= "Para atualizar pedidos que estão em preparação",
+         summary= "Para atualizar quando tiverem prontos",
          tags = ["Pedidos"])
 def atualizar_pedido_cozinha(id_pedido: int):
     return crud.atualizar_pedido_cozinha(db, id_pedido)
